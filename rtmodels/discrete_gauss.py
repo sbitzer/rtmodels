@@ -57,7 +57,7 @@ class discrete_static_gauss(rtmodel):
     def Trials(self, Trials):
         if self.use_features:
             self._Trials = Trials
-            S, D, self._L = Trials
+            S, D, self._L = Trials.shape
             
             if self.D != D:
                 warn('The dimensions of the input features in "Trials" ' + 
@@ -298,26 +298,69 @@ class discrete_static_gauss(rtmodel):
             features = self.means[:, self._Trials[trind]]
             features = np.kron(np.ones((self.S, 1, 1)), features[None, :, :])
             
-        toresponse_intern = np.r_[-1, self.toresponse[1]]
-            
         # call the compiled function
-        choices, rts = gen_response_jitted(features, self.maxrt, toresponse_intern, 
-            self.choices, self.dt, self.means, allpars['prior'], allpars['noisestd'], 
-            allpars['intstd'], allpars['bound'], allpars['ndtmean'], 
-            allpars['ndtspread'], allpars['lapseprob'], allpars['lapsetoprob'])
-        
+        choices, rts = self.gen_response_jitted(features, allpars)
+            
         # transform choices to those expected by user, if necessary
         if user_code:
+            toresponse_intern = np.r_[-1, self.toresponse[1]]
             timed_out = choices == toresponse_intern[0]
             choices[timed_out] = self.toresponse[0]
             in_time = np.logical_not(timed_out)
             choices[in_time] = self.choices[choices[in_time]]
             
         return choices, rts
+        
+        
+    def gen_response_jitted(self, features, allpars):
+        toresponse_intern = np.r_[-1, self.toresponse[1]]
+            
+        # call the compiled function
+        choices, rts = gen_response_jitted_dsg(features, self.maxrt, toresponse_intern, 
+            self.choices, self.dt, self.means, allpars['prior'], allpars['noisestd'], 
+            allpars['intstd'], allpars['bound'], allpars['ndtmean'], 
+            allpars['ndtspread'], allpars['lapseprob'], allpars['lapsetoprob'])
+            
+        return choices, rts
+
+
+class sensory_discrete_static_gauss(discrete_static_gauss):
+    "Drift of sensory accumulator"
+    sensdrift = 1.0
     
+    parnames = ['bound', 'noisestd', 'intstd', 'sensdrift', 'prior', 'ndtmean', 
+                'ndtspread', 'lapseprob', 'lapsetoprob']
+
+    def __init__(self, use_features=None, Trials=None, dt=None, means=None, 
+                 prior=None, noisestd=None, sensdrift=None, intstd=None, 
+                 ndtmean=None, ndtspread=None, lapseprob=None, lapsetoprob=None,
+                 choices=None, maxrt=None, toresponse=None):
+        super(sensory_discrete_static_gauss, self).__init__(use_features, 
+            Trials, dt, means, prior, noisestd, intstd, ndtmean, ndtspread,
+            lapseprob, lapsetoprob, choices, maxrt, toresponse)
+        
+        if self.C != 2:
+            raise ValueError("The sensory discrete static gauss model is " + 
+                             "currently only implemented for 2 alternatives.")
+        
+        if sensdrift is not None:
+            self.sensdrift = sensdrift
+
+            
+    def gen_response_jitted(self, features, allpars):
+        toresponse_intern = np.r_[-1, self.toresponse[1]]
+            
+        # call the compiled function
+        choices, rts = gen_response_jitted_sdsg(features, self.maxrt, toresponse_intern, 
+            self.choices, self.dt, self.means, allpars['prior'], allpars['noisestd'], 
+            allpars['intstd'], allpars['sensdrift'], allpars['bound'], allpars['ndtmean'], 
+            allpars['ndtspread'], allpars['lapseprob'], allpars['lapsetoprob'])
+        
+        return choices, rts
+        
 
 @jit(nopython=True, cache=True)
-def gen_response_jitted(features, maxrt, toresponse, choices, dt, means,
+def gen_response_jitted_dsg(features, maxrt, toresponse, choices, dt, means,
     prior, noisestd, intstd, bound, ndtmean, ndtspread, lapseprob, lapsetoprob):
     
     C = len(choices)
@@ -374,6 +417,70 @@ def gen_response_jitted(features, maxrt, toresponse, choices, dt, means,
                 if exitflag:
                     break
     
+    return choices_out, rts
+    
+    
+@jit(nopython=True, cache=True)
+def gen_response_jitted_sdsg(features, maxrt, toresponse, choices, dt, means,
+    prior, noisestd, intstd, sensdrift, bound, ndtmean, ndtspread, lapseprob, 
+    lapsetoprob):
+    
+    C = len(choices)
+    S, D, N = features.shape
+    
+    choices_out = np.full(N, toresponse[0], dtype=np.int8)
+    rts = np.full(N, toresponse[1])
+    
+    sqrtdt = math.sqrt(dt)
+    
+    for tr in range(N):
+        # is it a lapse trial?
+        if random.random() < lapseprob[tr]:
+            # is it a timed-out lapse trial?
+            if random.random() < lapsetoprob[tr]:
+                choices_out[tr] = toresponse[0]
+                rts[tr] = toresponse[1]
+            else:
+                choices_out[tr] = random.randint(0, C-1)
+                rts[tr] = random.random() * maxrt
+        else:
+            # get DDM bound
+            boundtr = math.log(bound[tr] / (1 - bound[tr]))
+            
+            # get DDM starting point from prior (bias for log-likelihood ratio)
+            y = math.log(prior[tr, 0] / (1 - prior[tr, 0]))
+            
+            # for all presented features
+            for t in range(S):
+                # compute sum of squares between features and means
+                sum_sq = np.zeros(C)
+                for c in range(C):
+                    for d in range(D):
+                        sum_sq[c] += (features[t, d, tr] - means[d, c]) ** 2
+                        
+                # compute the log-likelihood-ratio for this feature
+                llr = (sum_sq[1] - sum_sq[0]) / (2 * noisestd[tr])
+                
+                # determine the time in which sensdrift applies
+                ts = min(dt, math.fabs(llr) / sensdrift[tr])
+                
+                # increment the accumulating llr by the end state of the 
+                # sensory Gaussian accumulator
+                if llr > 0:
+                    y += random.gauss(sensdrift[tr] * ts, noisestd[tr] * sqrtdt)
+                else:
+                    y += random.gauss(-sensdrift[tr] * ts, noisestd[tr] * sqrtdt)
+            
+                if math.fabs(y) >= boundtr:
+                    if y > 0:
+                        choices_out[tr] = 0
+                    else:
+                        choices_out[tr] = 1
+                    rts[tr] = t * dt + random.lognormvariate(
+                        ndtmean[tr], ndtspread[tr])
+                    
+                    break
+                    
     return choices_out, rts
     
     
