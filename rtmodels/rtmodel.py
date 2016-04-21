@@ -48,12 +48,32 @@ class rtmodel(metaclass=ABCMeta):
     def gen_response_with_params(self, trind, params, parnames, user_code):
         pass
     
+    def gen_response_from_Gauss_posterior(self, trind, parnames, mean, cov, S,
+                                          transformfun=None, return_samples=False):
+        samples = np.random.multivariate_normal(mean, cov, S)
+        if transformfun is not None:
+            samples = transformfun(samples)
+            
+        N = trind.size
+        trind = np.tile(trind, (S, 1)).reshape((N*S, 1), order='F').squeeze()
+        samples_long = np.tile(samples, (N, 1))
+        
+        choices, rts = self.gen_response_with_params(trind, samples_long, parnames)
+        
+        choices = np.reshape(choices, (N, S), order='F')
+        rts = np.reshape(rts, (N, S), order='F')
+        
+        if return_samples:
+            return choices, rts, samples
+        else:
+            return choices, rts
+    
     
     def gen_distances_with_params(self, choice_data, rt_data, trind, params, 
                                   parnames):
         choices, rts = self.gen_response_with_params(trind, params, parnames)
         
-        return rtmodel.response_distance(choice_data, choices, rt_data, rts)
+        return response_distance(choice_data, choices, rt_data, rts)
     
     
     def plot_response_distribution(self, choice, rt):
@@ -68,25 +88,49 @@ class rtmodel(metaclass=ABCMeta):
         plt.show()
         
         return ax
-        
     
-    def response_distance(choice1, choice2, rt1, rt2, useRT=True):
-        if ((np.isscalar(choice1) and type(choice1) is str) or 
-            choice1.dtype.type is np.str_):
-            raise ValueError('The distance function is currently not ' + 
-                             'implemented for choices coded with strings.')
-        
-        if useRT:
-            return response_dist_ufunc(choice1, choice2, rt1, rt2)
-        else:
-            return response_dist_ufunc(choice1, choice2, np.nan, np.nan)
-            
-            
-    def estimate_abc_loglik(choice_data, rt_data, choice_sample, rt_sample, epsilon):
-        return ( np.log((rtmodel.response_distance(choice_data, choice_sample, 
-            rt_data, rt_sample) < epsilon).sum(axis=0)) - 
-            np.log(choice_sample.shape[0]) )
+
+def estimate_abc_loglik(choice_data, rt_data, choice_sample, rt_sample, epsilon):
+    N = choice_data.size
+    if choice_sample.ndim == 2:
+        NP, P = choice_sample.shape
+    elif N == 1:
+        P = choice_sample.size
+        NP = 1
+        choice_sample = choice_sample[None, :]
+        rt_sample = rt_sample[None, :]
+    if N != NP:
+        raise ValueError('The number of data points (N=%d) ' % N + 
+                         'does not fit together with the dimensions of ' + 
+                         'the samples from the model (%d x %d)!' % (NP, P))
+                         
+    # expand choice_data and rt_data
+    choice_data = np.tile(choice_data, (1, P)).squeeze()
+    rt_data = np.tile(rt_data, (1, P)).squeeze()
+    # reshape the samples
+    choice_sample = choice_sample.reshape((N*P, 1), order='F').squeeze()
+    rt_sample = rt_sample.reshape((N*P, 1), order='F').squeeze()
     
+    # then compute distances, reshape
+    accepted = response_distance(choice_data, choice_sample, 
+                                 rt_data, rt_sample) < epsilon
+    # reshape into sample shape and sum
+    naccepted = np.sum(accepted.reshape((N, P), order='F'), axis=1)
+    
+    return np.log(naccepted) - np.log(P)
+
+
+def response_distance(choice1, choice2, rt1, rt2, useRT=True):
+    if ((np.isscalar(choice1) and type(choice1) is str) or 
+        choice1.dtype.type is np.str_):
+        raise ValueError('The distance function is currently not ' + 
+                         'implemented for choices coded with strings.')
+    
+    if useRT:
+        return response_dist_ufunc(choice1, choice2, rt1, rt2)
+    else:
+        return response_dist_ufunc(choice1, choice2, np.nan, np.nan)
+
 
 @vectorize(nopython=True)
 def response_dist_ufunc(choice1, choice2, rt1, rt2):
