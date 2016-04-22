@@ -60,8 +60,8 @@ class rtmodel(metaclass=ABCMeta):
         
         choices, rts = self.gen_response_with_params(trind, samples_long, parnames)
         
-        choices = np.reshape(choices, (N, S), order='F')
-        rts = np.reshape(rts, (N, S), order='F')
+        choices = np.reshape(choices, (N, S), order='C')
+        rts = np.reshape(rts, (N, S), order='C')
         
         if return_samples:
             return choices, rts, samples

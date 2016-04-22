@@ -209,7 +209,7 @@ class discrete_static_gauss(rtmodel):
     def gen_response(self, trind, rep=1):
         N = trind.size
         if rep > 1:
-            trind = np.kron(np.ones(rep), trind)
+            trind = np.tile(trind, rep)
         
         choices, rts = self.gen_response_with_params(trind)
         
@@ -283,9 +283,9 @@ class discrete_static_gauss(rtmodel):
                 
             if name == 'prior':
                 if allpars[name].ndim == 1:
-                    allpars[name] = np.kron(np.ones((N,1)), allpars[name])
+                    allpars[name] = np.tile(allpars[name], (N,1))
                 elif allpars[name].shape[0] == 1 and N > 1:
-                    allpars[name] = np.kron(np.ones((N,1)), allpars[name])
+                    allpars[name] = np.tile(allpars[name], (N,1))
             elif np.isscalar(allpars[name]) and N > 1:
                 allpars[name] = np.full(N, allpars[name], dtype=float)
             elif allpars[name].shape[0] == 1 and N > 1:
@@ -296,7 +296,7 @@ class discrete_static_gauss(rtmodel):
             features = self.Trials[:, :, trind]
         else:
             features = self.means[:, self._Trials[trind]]
-            features = np.kron(np.ones((self.S, 1, 1)), features[None, :, :])
+            features = np.tile(features, (self.S, 1, 1))
             
         # call the compiled function
         choices, rts = self.gen_response_jitted(features, allpars)
@@ -409,7 +409,8 @@ def gen_response_jitted_dsg(features, maxrt, toresponse, choices, dt, means,
                 for c in range(C):
                     if logpost[c] >= boundtr:
                         choices_out[tr] = c
-                        rts[tr] = t * dt + random.lognormvariate(
+                        # add 1 to t because t starts from 0
+                        rts[tr] = (t+1) * dt + random.lognormvariate(
                             ndtmean[tr], ndtspread[tr])
                         exitflag = True
                         break
@@ -476,7 +477,7 @@ def gen_response_jitted_sdsg(features, maxrt, toresponse, choices, dt, means,
                         choices_out[tr] = 0
                     else:
                         choices_out[tr] = 1
-                    rts[tr] = t * dt + random.lognormvariate(
+                    rts[tr] = (t+1) * dt + random.lognormvariate(
                         ndtmean[tr], ndtspread[tr])
                     
                     break
