@@ -460,7 +460,7 @@ def gen_response_jitted_sdsg(features, maxrt, toresponse, choices, dt, means,
                         sum_sq[c] += (features[t, d, tr] - means[d, c]) ** 2
                         
                 # compute the log-likelihood-ratio for this feature
-                llr = (sum_sq[1] - sum_sq[0]) / (2 * noisestd[tr])
+                llr = (sum_sq[1] - sum_sq[0]) / (2 * intstd[tr] ** 2)
                 
                 # determine the time in which sensdrift applies
                 ts = min(dt, math.fabs(llr) / sensdrift[tr])
