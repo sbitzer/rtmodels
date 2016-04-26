@@ -9,6 +9,7 @@ from abc import ABCMeta, abstractmethod
 import numpy as np
 import matplotlib.pyplot as plt
 from numba import vectorize
+import seaborn as sns
 
 class rtmodel(metaclass=ABCMeta):
 
@@ -88,6 +89,26 @@ class rtmodel(metaclass=ABCMeta):
         plt.show()
         
         return ax
+        
+    def plot_parameter_distribution(self, samples, names, q_lower=0, q_upper=1):
+        pg = sns.PairGrid(samples, hue='distribution', diag_sharey=False)
+        pg.map_diag(sns.distplot, kde=False)
+        pg.map_offdiag(plt.scatter, alpha=0.3)
+        
+        # adjust axis limits distorted by kdeplot
+        for p, name in enumerate(names):
+            low = samples[name].quantile(q_lower)
+            up = samples[name].quantile(q_upper)
+            lims = [low - 0.1 * up, 1.1 * up]
+            pg.axes[0, p].set_xlim(lims)
+            if p == 0:
+                pg.axes[p, 1].set_ylim(lims)
+            else:
+                pg.axes[p, 0].set_ylim(lims)
+                
+        pg.add_legend(frameon=True)
+        
+        return pg
     
 
 def estimate_abc_loglik(choice_data, rt_data, choice_sample, rt_sample, epsilon):

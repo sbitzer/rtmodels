@@ -322,6 +322,24 @@ class discrete_static_gauss(rtmodel):
             allpars['ndtspread'], allpars['lapseprob'], allpars['lapsetoprob'])
             
         return choices, rts
+        
+    
+    def plot_parameter_distribution(self, samples, names, q_lower=0, q_upper=1):
+        if 'ndtmean' in samples.columns and 'ndtspread' in samples.columns:
+            samples = samples.copy()
+            samples['ndtmode'] = np.exp(samples['ndtmean'] - samples['ndtspread']**2)
+            samples['ndtstd'] = np.sqrt( (np.exp(samples['ndtspread']**2) - 1) * 
+                np.exp(2 * samples['ndtmean'] + samples['ndtspread']**2) )
+            samples.drop(['ndtmean', 'ndtspread'], axis=1, inplace=True)
+            
+            names = names.copy()
+            names.remove('ndtmean')
+            names.remove('ndtspread')
+            names.append('ndtmode')
+            names.append('ndtstd')
+            
+        super(discrete_static_gauss, self).plot_parameter_distribution(
+            samples, names, q_lower, q_upper)
 
 
 class sensory_discrete_static_gauss(discrete_static_gauss):
@@ -417,6 +435,10 @@ def gen_response_jitted_dsg(features, maxrt, toresponse, choices, dt, means,
                     
                 if exitflag:
                     break
+                
+            if rts[tr] > maxrt:
+                choices_out[tr] = toresponse[0]
+                rts[tr] = toresponse[1]
     
     return choices_out, rts
     
@@ -481,6 +503,10 @@ def gen_response_jitted_sdsg(features, maxrt, toresponse, choices, dt, means,
                         ndtmean[tr], ndtspread[tr])
                     
                     break
+                
+            if rts[tr] > maxrt:
+                choices_out[tr] = toresponse[0]
+                rts[tr] = toresponse[1]
                     
     return choices_out, rts
     
