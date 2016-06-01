@@ -107,11 +107,18 @@ class discrete_static_gauss(rtmodel):
                      'model. Update Trials!')
             self._D = D
 
-    parnames = ['bound', 'noisestd', 'intstd', 'prior', 'ndtmean', 'ndtspread',
-                'lapseprob', 'lapsetoprob']
+    parnames = ['bound', 'bstretch', 'bshape', 'noisestd', 'intstd', 'prior', 
+                'ndtmean', 'ndtspread', 'lapseprob', 'lapsetoprob']
 
-    "Bound that needs to be reached before decision is made."
+    """Bound that needs to be reached before decision is made.
+       If collapsing, it's the initial value."""
     bound = 0.8
+    
+    "Extent of collapse for bound, see boundfun."
+    bstretch = 0
+    
+    "Shape parameter of the collapsing bound, see boundfun"
+    bshape = 1.4
     
     "Standard deviation of noise added to feature values."
     noisestd = 1
@@ -137,7 +144,8 @@ class discrete_static_gauss(rtmodel):
     prior_re = re.compile('(?:prior)(?:_(\d))?')
     
     def __init__(self, use_features=None, Trials=None, dt=None, means=None, 
-                 prior=None, noisestd=None, intstd=None, ndtmean=None, 
+                 prior=None, noisestd=None, intstd=None, bound=None, 
+                 bstretch=None, bshape=None, ndtmean=None, 
                  ndtspread=None, lapseprob=None, lapsetoprob=None,
                  choices=None, maxrt=None, toresponse=None):
         super(discrete_static_gauss, self).__init__(choices, maxrt, 
@@ -193,6 +201,15 @@ class discrete_static_gauss(rtmodel):
         if intstd is not None:
             self.intstd = intstd
             
+        if bound is not None:
+            self.bound = bound
+            
+        if bstretch is not None:
+            self.bstretch = bstretch
+        
+        if bshape is not None:
+            self.bshape = bshape
+            
         if ndtmean is not None:
             self.ndtmean = ndtmean
             
@@ -245,6 +262,12 @@ class discrete_static_gauss(rtmodel):
                             new_prior = False
                         pardict['prior'][:, int(ind_prior)] = params[:, ind]
         parnames = pardict.keys()
+        
+        # check whether any of the bound parameters are given
+        if any(x in ['bound', 'bstretch', 'bshape'] for x in parnames):
+            changing_bound = True
+        else:
+            changing_bound = False
         
         # get the number of different parameter sets, P, and check whether the 
         # given parameter counts are consistent (all have the same P)
@@ -299,7 +322,8 @@ class discrete_static_gauss(rtmodel):
             features = np.tile(features, (self.S, 1, 1))
             
         # call the compiled function
-        choices, rts = self.gen_response_jitted(features, allpars)
+        choices, rts = self.gen_response_jitted(features, allpars, 
+                                                changing_bound)
             
         # transform choices to those expected by user, if necessary
         if user_code:
@@ -312,14 +336,15 @@ class discrete_static_gauss(rtmodel):
         return choices, rts
         
         
-    def gen_response_jitted(self, features, allpars):
+    def gen_response_jitted(self, features, allpars, changing_bound):
         toresponse_intern = np.r_[-1, self.toresponse[1]]
             
         # call the compiled function
         choices, rts = gen_response_jitted_dsg(features, self.maxrt, toresponse_intern, 
             self.choices, self.dt, self.means, allpars['prior'], allpars['noisestd'], 
-            allpars['intstd'], allpars['bound'], allpars['ndtmean'], 
-            allpars['ndtspread'], allpars['lapseprob'], allpars['lapsetoprob'])
+            allpars['intstd'], allpars['bound'], allpars['bstretch'], 
+            allpars['bshape'], allpars['ndtmean'], allpars['ndtspread'], 
+            allpars['lapseprob'], allpars['lapsetoprob'], changing_bound)
             
         return choices, rts
         
@@ -346,16 +371,19 @@ class sensory_discrete_static_gauss(discrete_static_gauss):
     "Drift of sensory accumulator"
     sensdrift = 1.0
     
-    parnames = ['bound', 'noisestd', 'intstd', 'sensdrift', 'prior', 'ndtmean', 
-                'ndtspread', 'lapseprob', 'lapsetoprob']
+    parnames = ['bound', 'bstretch', 'bshape', 'noisestd', 'intstd', 
+                'sensdrift', 'prior', 'ndtmean', 'ndtspread', 'lapseprob', 
+                'lapsetoprob']
 
     def __init__(self, use_features=None, Trials=None, dt=None, means=None, 
                  prior=None, noisestd=None, sensdrift=None, intstd=None, 
-                 ndtmean=None, ndtspread=None, lapseprob=None, lapsetoprob=None,
+                 bound=None, bstretch=None, bshape=None, ndtmean=None, 
+                 ndtspread=None, lapseprob=None, lapsetoprob=None,
                  choices=None, maxrt=None, toresponse=None):
         super(sensory_discrete_static_gauss, self).__init__(use_features, 
-            Trials, dt, means, prior, noisestd, intstd, ndtmean, ndtspread,
-            lapseprob, lapsetoprob, choices, maxrt, toresponse)
+            Trials, dt, means, prior, noisestd, intstd, bound, bstretch, 
+            bshape, ndtmean, ndtspread, lapseprob, lapsetoprob, choices, maxrt, 
+            toresponse)
         
         if self.C != 2:
             raise ValueError("The sensory discrete static gauss model is " + 
@@ -365,27 +393,37 @@ class sensory_discrete_static_gauss(discrete_static_gauss):
             self.sensdrift = sensdrift
 
             
-    def gen_response_jitted(self, features, allpars):
+    def gen_response_jitted(self, features, allpars, changing_bound):
         toresponse_intern = np.r_[-1, self.toresponse[1]]
             
         # call the compiled function
         choices, rts = gen_response_jitted_sdsg(features, self.maxrt, toresponse_intern, 
             self.choices, self.dt, self.means, allpars['prior'], allpars['noisestd'], 
-            allpars['intstd'], allpars['sensdrift'], allpars['bound'], allpars['ndtmean'], 
-            allpars['ndtspread'], allpars['lapseprob'], allpars['lapsetoprob'])
+            allpars['intstd'], allpars['sensdrift'], allpars['bound'], 
+            allpars['bstretch'], allpars['bshape'], allpars['ndtmean'], 
+            allpars['ndtspread'], allpars['lapseprob'], allpars['lapsetoprob'], 
+            changing_bound)
         
         return choices, rts
         
 
 @jit(nopython=True, cache=True)
 def gen_response_jitted_dsg(features, maxrt, toresponse, choices, dt, means,
-    prior, noisestd, intstd, bound, ndtmean, ndtspread, lapseprob, lapsetoprob):
+    prior, noisestd, intstd, bound, bstretch, bshape, ndtmean, ndtspread, 
+    lapseprob, lapsetoprob, changing_bound):
     
     C = len(choices)
     S, D, N = features.shape
     
     choices_out = np.full(N, toresponse[0], dtype=np.int8)
     rts = np.full(N, toresponse[1])
+    
+    # pre-compute collapsing bound
+    boundvals = np.full(S, math.log(bound[0]))
+    if bstretch[0] > 0:
+        for t in range(S):
+            boundvals[t] = math.log( boundfun((t+1.0) / maxrt, bound[0], 
+                bstretch[0], bshape[0]) )
     
     for tr in range(N):
         # is it a lapse trial?
@@ -398,8 +436,6 @@ def gen_response_jitted_dsg(features, maxrt, toresponse, choices, dt, means,
                 choices_out[tr] = random.randint(0, C-1)
                 rts[tr] = random.random() * maxrt
         else:
-            boundtr = math.log(bound[tr])
-            
             logev = np.zeros(C)
             logev[:C-1] = np.log(prior[tr, :])
             logev[-1] = math.log(1 - prior[tr, :].sum())
@@ -407,6 +443,18 @@ def gen_response_jitted_dsg(features, maxrt, toresponse, choices, dt, means,
             # for all presented features
             exitflag = False
             for t in range(S):
+                # get current bound value
+                if changing_bound:
+                    # need to compute boundval from parameters in this trial
+                    if bstretch[tr] == 0:
+                        boundval = math.log(bound[tr])
+                    else:
+                        boundval = math.log( boundfun((t+1.0) / maxrt, 
+                            bound[tr], bstretch[tr], bshape[tr]) )
+                else:
+                    # can use pre-computed bound value
+                    boundval = boundvals[t]
+                
                 # add noise to feature
                 noisy_feature = np.zeros(D)
                 for d in range(D):
@@ -425,7 +473,7 @@ def gen_response_jitted_dsg(features, maxrt, toresponse, choices, dt, means,
                 logpost = normaliselogprob(logev)
                 
                 for c in range(C):
-                    if logpost[c] >= boundtr:
+                    if logpost[c] >= boundval:
                         choices_out[tr] = c
                         # add 1 to t because t starts from 0
                         rts[tr] = (t+1) * dt + random.lognormvariate(
@@ -445,8 +493,8 @@ def gen_response_jitted_dsg(features, maxrt, toresponse, choices, dt, means,
     
 @jit(nopython=True, cache=True)
 def gen_response_jitted_sdsg(features, maxrt, toresponse, choices, dt, means,
-    prior, noisestd, intstd, sensdrift, bound, ndtmean, ndtspread, lapseprob, 
-    lapsetoprob):
+    prior, noisestd, intstd, sensdrift, bound, bstretch, bshape, ndtmean, 
+    ndtspread, lapseprob, lapsetoprob, changing_bound):
     
     C = len(choices)
     S, D, N = features.shape
@@ -455,6 +503,13 @@ def gen_response_jitted_sdsg(features, maxrt, toresponse, choices, dt, means,
     rts = np.full(N, toresponse[1])
     
     sqrtdt = math.sqrt(dt)
+    
+    # pre-compute collapsing bound (in DDM, i.e., loglik space)
+    boundvals = np.full(S, math.log(bound[0] / (1-bound[0])))
+    if bstretch[0] > 0:
+        for t in range(S):
+            bval = boundfun((t+1.0) / maxrt, bound[0], bstretch[0], bshape[0])
+            boundvals[t] = math.log( bval / (1 - bval) )
     
     for tr in range(N):
         # is it a lapse trial?
@@ -467,9 +522,6 @@ def gen_response_jitted_sdsg(features, maxrt, toresponse, choices, dt, means,
                 choices_out[tr] = random.randint(0, C-1)
                 rts[tr] = random.random() * maxrt
         else:
-            # get DDM bound
-            boundtr = math.log(bound[tr] / (1 - bound[tr]))
-            
             # get DDM starting point from prior (bias for log-likelihood ratio)
             y = math.log(prior[tr, 0] / (1 - prior[tr, 0]))
             
@@ -494,7 +546,20 @@ def gen_response_jitted_sdsg(features, maxrt, toresponse, choices, dt, means,
                 else:
                     y += random.gauss(-sensdrift[tr] * ts, noisestd[tr] * sqrtdt)
             
-                if math.fabs(y) >= boundtr:
+                # get current bound value
+                if changing_bound:
+                    # need to compute boundval from parameters in this trial
+                    if bstretch[tr] == 0:
+                        boundval = math.log(bound[tr] / (1 - bound[tr]))
+                    else:
+                        bval = boundfun((t+1.0) / maxrt, bound[tr], 
+                                        bstretch[tr], bshape[tr])
+                        boundval = math.log( bval / (1 - bval) )
+                else:
+                    # can use pre-computed bound value
+                    boundval = boundvals[t]
+            
+                if math.fabs(y) >= boundval:
                     if y > 0:
                         choices_out[tr] = 0
                     else:
@@ -519,3 +584,11 @@ def normaliselogprob(logvals):
     logsum = mlogv + np.log( np.sum( np.exp(logvals - mlogv) ) )
     
     return logvals - logsum
+    
+
+@jit(nopython=True, cache=True)
+def boundfun(tfrac, bound, bstretch, bshape):
+    tshape = tfrac ** -bshape
+    
+    return 0.5 + (1 - bstretch) * (bound - 0.5) - ( bstretch * (bound - 0.5) *
+        (1 - tshape) / (1 + tshape) );
