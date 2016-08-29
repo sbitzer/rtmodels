@@ -141,7 +141,7 @@ class discrete_static_gauss(rtmodel):
     "Probability that a lapse will be timed out."
     lapsetoprob = 0.1
     
-    prior_re = re.compile('(?:prior)(?:_(\d))?')
+    prior_re = re.compile('(?:prior)(?:_(\d))?$')
     
     def __init__(self, use_features=None, Trials=None, dt=None, means=None, 
                  prior=None, noisestd=None, intstd=None, bound=None, 
