@@ -126,8 +126,23 @@ class discrete_static_gauss(rtmodel):
     "Standard deviation of internal uncertainty."
     intstd = 1
 
-    "Prior probabilities over choices."
-    prior = None
+    _prior = None
+    
+    @property
+    def prior(self):
+        "Prior probabilities over choices."
+        return self._prior
+        
+    @prior.setter
+    def prior(self, prior):
+        if np.isscalar(prior) and self.C == 2:
+            self._prior = np.array([prior])
+        elif type(prior) is np.ndarray and prior.size == self.C-1:
+            self._prior = prior
+        else:
+            raise TypeError("The prior should be a numpy array with C-1 "
+                            "elements! For two choices only you may also "
+                            "provide a scalar.")
     
     "Mean of nondecision time."
     ndtmean = 0
@@ -242,6 +257,10 @@ class discrete_static_gauss(rtmodel):
         if parnames is None:
             assert( type(params) is dict )
             pardict = params
+            if 'prior' in pardict:
+                if np.isscalar(pardict['prior']):
+                    assert self.C == 2, 'prior can only be scalar, if there are only 2 options'
+                    pardict['prior'] = np.array([pardict['prior']])
         else:
             assert( type(params) is np.ndarray )
             pardict = {}
@@ -309,7 +328,7 @@ class discrete_static_gauss(rtmodel):
                     allpars[name] = np.tile(allpars[name], (N,1))
                 elif allpars[name].shape[0] == 1 and N > 1:
                     allpars[name] = np.tile(allpars[name], (N,1))
-            elif np.isscalar(allpars[name]) and N > 1:
+            elif np.isscalar(allpars[name]) and N >= 1:
                 allpars[name] = np.full(N, allpars[name], dtype=float)
             elif allpars[name].shape[0] == 1 and N > 1:
                 allpars[name] = np.full(N, allpars[name], dtype=float)
