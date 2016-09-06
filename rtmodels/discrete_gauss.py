@@ -464,6 +464,60 @@ class sensory_discrete_static_gauss(discrete_static_gauss):
         return info
         
 
+class extended_discrete_static_gauss(discrete_static_gauss):
+    "Extended Bayesian Model"
+    etaN=0.1
+    sP=0.02
+    
+    parnames = ['bound', 'noisestd', 'etaN', 'intstd', 'prior', 'sP',
+                'ndtmean', 'ndtspread', 'lapseprob', 'lapsetoprob']
+
+    def __init__(self, use_features=None, Trials=None, dt=None, means=None, 
+                 prior=None, sP=None, noisestd=None, etaN=None,
+                 intstd=None, ndtmean=None, ndtspread=None, lapseprob=None, 
+                 lapsetoprob=None, choices=None, maxrt=None, toresponse=None):
+        super(extended_discrete_static_gauss, self).__init__(use_features, 
+            Trials, dt, means, prior, noisestd, intstd, ndtmean, ndtspread,
+            lapseprob, lapsetoprob, choices, maxrt, toresponse)
+                
+        self.name = 'Extended static Gauss model'
+        
+        if etaN is not None:
+            self.etaN=etaN
+        
+        if sP is not None:
+            self.sP = sP
+         
+    
+    # overwrite method of discrete_static_gauss to skip directly to basic 
+    # implementation of rtmodel
+    def plot_parameter_distribution(self, samples, names, q_lower=0, q_upper=1):
+        super(discrete_static_gauss, self).plot_parameter_distribution(
+            samples, names, q_lower, q_upper)
+    
+    
+    def gen_response_jitted(self, features, allpars):
+        toresponse_intern = np.r_[-1, self.toresponse[1]]
+            
+        # call the compiled function
+        choices, rts = gen_response_jitted_edsg(features, self.maxrt, toresponse_intern, 
+            self.choices, self.dt, self.means, allpars['prior'], allpars['sP'],
+            allpars['noisestd'], allpars['etaN'], allpars['intstd'], 
+            allpars['bound'], allpars['ndtmean'], allpars['ndtspread'], 
+            allpars['lapseprob'], allpars['lapsetoprob'])
+        
+        return choices, rts
+        
+
+    def __str__(self):
+        info = super(sensory_discrete_static_gauss, self).__str__()
+        
+        info += 'etaN         : %9.4f' % self.etaN + '\n'
+        info += 'sP           : %7.2f' % self.sP + '\n'
+        
+        return info
+        
+
 @jit(nopython=True, cache=True)
 def gen_response_jitted_dsg(features, maxrt, toresponse, choices, dt, means,
     prior, noisestd, intstd, bound, bstretch, bshape, ndtmean, ndtspread, 
@@ -631,7 +685,108 @@ def gen_response_jitted_sdsg(features, maxrt, toresponse, choices, dt, means,
                 rts[tr] = toresponse[1]
                     
     return choices_out, rts
+
+
+@jit(nopython=True, cache=True)
+def gen_response_jitted_edsg(features, maxrt, toresponse, choices, dt, means,
+    prior, sP, noisestd, etaN, intstd, bound, ndtmean, ndtspread, lapseprob, lapsetoprob):
     
+    C = len(choices)
+    assert C == 2, "extended discrete static gauss model only allows 2 choices"
+    
+    S, D, N = features.shape
+           
+    choices_out = np.full(N, toresponse[0], dtype=np.int8)
+    rts = np.full(N, toresponse[1])
+    
+    for tr in range(N):
+       
+        if(etaN[tr]!=0):
+                
+                zetaN=1/etaN[tr]
+                
+                #sample the noisestd values from the inverse Gaussian distribtuion
+                noisestdTrVal=np.random.wald(noisestd[tr],zetaN)
+    
+                negProp=(1+math.erf(-math.sqrt(zetaN/(2*noisestd[tr]))))/2
+        
+                #calculate the proportion of flipped trial and generate the respective vector
+                #indicating the features from which trial should be flipped
+                negNoiseTrial=np.random.binomial(1,1-negProp)
+
+        else:
+                noisestdTrVal=noisestd[tr]
+                negNoiseTrial=np.sign(noisestdTrVal)
+                
+        if negNoiseTrial==0:
+            negNoiseTrial=-1
+            
+        # is it a lapse trial?
+        if random.random() < lapseprob[tr]:
+            
+            # is it a timed-out lapse trial?
+            if random.random() < lapsetoprob[tr]:
+                choices_out[tr] = toresponse[0]
+                rts[tr] = toresponse[1]
+            else:
+                choices_out[tr] = random.randint(0, C-1)
+                rts[tr] = random.random() * maxrt
+        else:
+            boundtr = math.log(bound[tr])
+            
+            #sample the prior values from the uniform distribution
+            priorTrVal=np.random.uniform(prior[tr, 0] - sP[tr] / 2,
+                                         prior[tr, 0] + sP[tr] / 2)
+            
+            logev = np.zeros(C)
+            logev[0] = np.log(priorTrVal)
+            logev[1] = np.log(1 - priorTrVal)
+
+            # for all presented features
+            exitflag = False
+            for t in range(S):
+                # add noise to feature
+                noisy_feature = np.zeros(D)
+                # Perform the flipping for the trials indicated by negprop and binomial sampled negNoiseTrials
+                
+                for d in range(D):
+                    noisy_feature[d] = negNoiseTrial*features[t,d,tr] + random.gauss(
+                        0, noisestdTrVal*math.sqrt(dt))
+                
+                # compute log-likelihoods of internal generative models
+                for c in range(C):
+                    # I used numpy sum and power functions here before, but
+                    # this didn't compile with numba
+                    sum_sq = 0
+
+                    for d in range(D):
+                        sum_sq += (noisy_feature[d] - means[d, c]) ** 2
+                    
+                    #calculate the intstd based on the value for noisestdTrVals
+#                    intvarTrVal = (2 * noisestdTrVal) / (dt * 0.1)
+                    logev[c] += -1 / (2 * dt*intstd[tr]**2) * sum_sq
+                        
+                logpost = normaliselogprob(logev)
+                
+                for c in range(C):
+                    if logpost[c] >= boundtr:
+                        choices_out[tr] = c
+                        # add 1 to t because t starts from 0
+                        NdtTr = np.random.uniform(ndtmean[tr] - ndtspread[tr] / 2, 
+                                                  ndtmean[tr] + ndtspread[tr] / 2)
+                        rts[tr] = (t+1) * dt + NdtTr
+                        exitflag = True
+                        break
+                    
+                if exitflag:
+                    break
+           
+            if rts[tr] > maxrt:
+                choices_out[tr] = toresponse[0]
+                rts[tr] = toresponse[1]
+    
+    return choices_out, rts
+
     
 @jit(nopython=True, cache=True)
 def normaliselogprob(logvals):
