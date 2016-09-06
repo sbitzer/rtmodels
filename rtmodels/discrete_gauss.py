@@ -166,6 +166,8 @@ class discrete_static_gauss(rtmodel):
         super(discrete_static_gauss, self).__init__(choices, maxrt, 
             toresponse)
             
+        self.name = 'Discrete static Gauss model'
+            
         if dt is not None:
             self.dt = dt
             
@@ -384,7 +386,33 @@ class discrete_static_gauss(rtmodel):
             
         super(discrete_static_gauss, self).plot_parameter_distribution(
             samples, names, q_lower, q_upper)
-
+            
+    
+    def __str__(self):
+        info = super(discrete_static_gauss, self).__str__()
+        
+        # empty line
+        info += '\n'
+        
+        # model-specific parameters
+        info += 'means:\n'
+        info += self.means.__str__() + '\n'
+        info += 'uses features: %4d' % self.use_features + '\n'
+        info += 'dt           : %8.3f' % self.dt + '\n'
+        info += 'bound        : %8.3f' % self.bound + '\n'
+        info += 'bstretch     : %7.2f' % self.bstretch + '\n'
+        info += 'bshape       : %7.2f' % self.bshape + '\n'
+        info += 'noisestd     : %6.1f' % self.noisestd + '\n'
+        info += 'intstd       : %6.1f' % self.intstd + '\n'
+        info += 'ndtmean      : %7.2f' % self.ndtmean + '\n'
+        info += 'ndtspread    : %7.2f' % self.ndtspread + '\n'
+        info += 'lapseprob    : %7.2f' % self.lapseprob + '\n'
+        info += 'lapsetoprob  : %7.2f' % self.lapsetoprob + '\n'
+        info += 'prior        : ' + ', '.join(map(lambda s: '{:8.3f}'.format(s), 
+                                                  self.prior)) + '\n'
+        
+        return info
+        
 
 class sensory_discrete_static_gauss(discrete_static_gauss):
     "Drift of sensory accumulator"
@@ -403,6 +431,8 @@ class sensory_discrete_static_gauss(discrete_static_gauss):
             Trials, dt, means, prior, noisestd, intstd, bound, bstretch, 
             bshape, ndtmean, ndtspread, lapseprob, lapsetoprob, choices, maxrt, 
             toresponse)
+            
+        self.name = 'Sensory discrete static Gauss model'
         
         if self.C != 2:
             raise ValueError("The sensory discrete static gauss model is " + 
@@ -424,6 +454,14 @@ class sensory_discrete_static_gauss(discrete_static_gauss):
             changing_bound)
         
         return choices, rts
+        
+        
+    def __str__(self):
+        info = super(sensory_discrete_static_gauss, self).__str__()
+        
+        info += 'sensdrift    : %7.2f' % self.sensdrift + '\n'
+        
+        return info
         
 
 @jit(nopython=True, cache=True)

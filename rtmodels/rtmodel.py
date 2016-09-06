@@ -13,6 +13,9 @@ import seaborn as sns
 
 class rtmodel(metaclass=ABCMeta):
 
+    # name of the model
+    name = 'General RT model'
+    
     # number of trials currently stored in the model
     _L = 0
 
@@ -109,7 +112,21 @@ class rtmodel(metaclass=ABCMeta):
         pg.add_legend(frameon=True)
         
         return pg
+        
+        
+    def __str__(self):
+        # underlined model name
+        info =  self.name + '\n' + '-' * len(self.name) + '\n'  
+        
+        # parameters
+        info += 'choices  : ' + ', '.join(map(lambda s: '{: 1d}'.format(s), 
+                                              self.choices)) + '\n'
+        info += 'maxrt    : %4.2f' % self.maxrt + '\n'
+        info += 'time outs: %2d, %4.2f' % (self.toresponse[0], 
+                                           self.toresponse[1]) + '\n'
     
+        return info
+        
 
 def estimate_abc_loglik(choice_data, rt_data, choice_sample, rt_sample, epsilon):
     N = choice_data.size
