@@ -10,7 +10,7 @@ setup(
     packages=['rtmodels'],
     description='Models of response time.',
     zip_safe=False, # needed, because otherwise numba cannot cache
-    install_requires=['NumPy >=1.7.0', 'matplotlib', 'numba'],
+    install_requires=['NumPy >=1.7.0', 'matplotlib', 'seaborn', 'numba'],
     classifiers=[
                 'Development Status :: 3 - Alpha',
                 'Environment :: Console',
