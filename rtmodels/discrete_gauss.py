@@ -476,9 +476,11 @@ class extended_discrete_static_gauss(discrete_static_gauss):
                  prior=None, sP=None, noisestd=None, etaN=None,
                  intstd=None, ndtmean=None, ndtspread=None, lapseprob=None, 
                  lapsetoprob=None, choices=None, maxrt=None, toresponse=None):
-        super(extended_discrete_static_gauss, self).__init__(use_features, 
-            Trials, dt, means, prior, noisestd, intstd, ndtmean, ndtspread,
-            lapseprob, lapsetoprob, choices, maxrt, toresponse)
+        super(extended_discrete_static_gauss, self).__init__(
+            use_features=use_features, Trials=Trials, dt=dt, means=means, 
+            prior=prior, noisestd=noisestd, intstd=intstd, ndtmean=ndtmean, 
+            ndtspread=ndtspread, lapseprob=lapseprob, lapsetoprob=lapsetoprob, 
+            choices=choices, maxrt=maxrt, toresponse=toresponse)
                 
         self.name = 'Extended static Gauss model'
         
@@ -496,7 +498,7 @@ class extended_discrete_static_gauss(discrete_static_gauss):
             samples, names, q_lower, q_upper)
     
     
-    def gen_response_jitted(self, features, allpars):
+    def gen_response_jitted(self, features, allpars, changing_bound=False):
         toresponse_intern = np.r_[-1, self.toresponse[1]]
             
         # call the compiled function
@@ -510,7 +512,7 @@ class extended_discrete_static_gauss(discrete_static_gauss):
         
 
     def __str__(self):
-        info = super(sensory_discrete_static_gauss, self).__str__()
+        info = super(extended_discrete_static_gauss, self).__str__()
         
         info += 'etaN         : %9.4f' % self.etaN + '\n'
         info += 'sP           : %7.2f' % self.sP + '\n'
