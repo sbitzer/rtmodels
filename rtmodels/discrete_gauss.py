@@ -466,15 +466,16 @@ class sensory_discrete_static_gauss(discrete_static_gauss):
 
 class extended_discrete_static_gauss(discrete_static_gauss):
     "Extended Bayesian Model"
-    etaN=0.1
+    etaN=0.0001
+    kappa = 0.0001
     sP=0.02
     
-    parnames = ['bound', 'noisestd', 'etaN', 'intstd', 'prior', 'sP',
+    parnames = ['bound', 'noisestd', 'etaN', 'intstd', 'kappa', 'prior', 'sP',
                 'ndtmean', 'ndtspread', 'lapseprob', 'lapsetoprob']
 
     def __init__(self, use_features=None, Trials=None, dt=None, means=None, 
                  prior=None, sP=None, noisestd=None, etaN=None,
-                 intstd=None, ndtmean=None, ndtspread=None, lapseprob=None, 
+                 intstd=None, kappa=None, ndtmean=None, ndtspread=None, lapseprob=None, 
                  lapsetoprob=None, choices=None, maxrt=None, toresponse=None):
         super(extended_discrete_static_gauss, self).__init__(
             use_features=use_features, Trials=Trials, dt=dt, means=means, 
@@ -486,6 +487,9 @@ class extended_discrete_static_gauss(discrete_static_gauss):
         
         if etaN is not None:
             self.etaN=etaN
+        
+        if kappa is not None:
+            self.kappa=kappa
         
         if sP is not None:
             self.sP = sP
@@ -505,8 +509,8 @@ class extended_discrete_static_gauss(discrete_static_gauss):
         choices, rts = gen_response_jitted_edsg(features, self.maxrt, toresponse_intern, 
             self.choices, self.dt, self.means, allpars['prior'], allpars['sP'],
             allpars['noisestd'], allpars['etaN'], allpars['intstd'], 
-            allpars['bound'], allpars['ndtmean'], allpars['ndtspread'], 
-            allpars['lapseprob'], allpars['lapsetoprob'])
+            allpars['kappa'], allpars['bound'], allpars['ndtmean'], 
+            allpars['ndtspread'], allpars['lapseprob'], allpars['lapsetoprob'])
         
         return choices, rts
         
@@ -515,6 +519,7 @@ class extended_discrete_static_gauss(discrete_static_gauss):
         info = super(extended_discrete_static_gauss, self).__str__()
         
         info += 'etaN         : %9.4f' % self.etaN + '\n'
+        info += 'kappa        : %9.4f' % self.kappa + '\n'
         info += 'sP           : %7.2f' % self.sP + '\n'
         
         return info
@@ -691,7 +696,8 @@ def gen_response_jitted_sdsg(features, maxrt, toresponse, choices, dt, means,
 
 @jit(nopython=True, cache=True)
 def gen_response_jitted_edsg(features, maxrt, toresponse, choices, dt, means,
-    prior, sP, noisestd, etaN, intstd, bound, ndtmean, ndtspread, lapseprob, lapsetoprob):
+    prior, sP, noisestd, etaN, intstd, kappa, bound, ndtmean, ndtspread, 
+    lapseprob, lapsetoprob):
     
     C = len(choices)
     assert C == 2, "extended discrete static gauss model only allows 2 choices"
@@ -722,6 +728,11 @@ def gen_response_jitted_edsg(features, maxrt, toresponse, choices, dt, means,
                 
         if negNoiseTrial==0:
             negNoiseTrial=-1
+            
+        if kappa[tr] == 0:
+            intstdTrVal = intstd[tr]
+        else:
+            intstdTrVal = np.random.wald(intstd[tr], 1/kappa[tr])
             
         # is it a lapse trial?
         if random.random() < lapseprob[tr]:
@@ -766,7 +777,7 @@ def gen_response_jitted_edsg(features, maxrt, toresponse, choices, dt, means,
                     
                     #calculate the intstd based on the value for noisestdTrVals
 #                    intvarTrVal = (2 * noisestdTrVal) / (dt * 0.1)
-                    logev[c] += -1 / (2 * dt*intstd[tr]**2) * sum_sq
+                    logev[c] += -1 / (2 * dt*intstdTrVal**2) * sum_sq
                         
                 logpost = normaliselogprob(logev)
                 
