@@ -763,7 +763,7 @@ def gen_response_jitted_edsg(features, maxrt, toresponse, choices, dt, means,
             logev[1] = np.log(1 - priorTrVal)
 
             if coupling[tr]:
-                intvartr = noisestdTrVal / (dt * 3.5) * meandist
+                intvartr = noisestdTrVal / (dt * 2.8) * meandist
             elif kappa[tr] == 0:
                 intvartr = intstd[tr] ** 2
             else:
