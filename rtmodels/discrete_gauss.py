@@ -466,15 +466,17 @@ class sensory_discrete_static_gauss(discrete_static_gauss):
 
 class extended_discrete_static_gauss(discrete_static_gauss):
     "Extended Bayesian Model"
+    coupling = False
     etaN=0.0001
     kappa = 0.0001
     sP=0.02
     
-    parnames = ['bound', 'noisestd', 'etaN', 'intstd', 'kappa', 'prior', 'sP',
-                'ndtmean', 'ndtspread', 'lapseprob', 'lapsetoprob']
+    parnames = ['bound', 'noisestd', 'etaN', 'coupling', 'intstd', 'kappa', 
+                'prior', 'sP', 'ndtmean', 'ndtspread', 'lapseprob', 
+                'lapsetoprob']
 
     def __init__(self, use_features=None, Trials=None, dt=None, means=None, 
-                 prior=None, sP=None, noisestd=None, etaN=None,
+                 prior=None, sP=None, noisestd=None, etaN=None, coupling=None,
                  intstd=None, kappa=None, ndtmean=None, ndtspread=None, lapseprob=None, 
                  lapsetoprob=None, choices=None, maxrt=None, toresponse=None):
         super(extended_discrete_static_gauss, self).__init__(
@@ -484,6 +486,9 @@ class extended_discrete_static_gauss(discrete_static_gauss):
             choices=choices, maxrt=maxrt, toresponse=toresponse)
                 
         self.name = 'Extended static Gauss model'
+        
+        if coupling is not None:
+            self.coupling = coupling
         
         if etaN is not None:
             self.etaN=etaN
@@ -508,9 +513,10 @@ class extended_discrete_static_gauss(discrete_static_gauss):
         # call the compiled function
         choices, rts = gen_response_jitted_edsg(features, self.maxrt, toresponse_intern, 
             self.choices, self.dt, self.means, allpars['prior'], allpars['sP'],
-            allpars['noisestd'], allpars['etaN'], allpars['intstd'], 
-            allpars['kappa'], allpars['bound'], allpars['ndtmean'], 
-            allpars['ndtspread'], allpars['lapseprob'], allpars['lapsetoprob'])
+            allpars['noisestd'], allpars['etaN'], allpars['coupling'], 
+            allpars['intstd'], allpars['kappa'], allpars['bound'], 
+            allpars['ndtmean'], allpars['ndtspread'], allpars['lapseprob'], 
+            allpars['lapsetoprob'])
         
         return choices, rts
         
@@ -518,6 +524,7 @@ class extended_discrete_static_gauss(discrete_static_gauss):
     def __str__(self):
         info = super(extended_discrete_static_gauss, self).__str__()
         
+        info += 'coupling     : %4d' % self.coupling + '\n'
         info += 'etaN         : %9.4f' % self.etaN + '\n'
         info += 'kappa        : %9.4f' % self.kappa + '\n'
         info += 'sP           : %7.2f' % self.sP + '\n'
@@ -696,14 +703,19 @@ def gen_response_jitted_sdsg(features, maxrt, toresponse, choices, dt, means,
 
 @jit(nopython=True, cache=True)
 def gen_response_jitted_edsg(features, maxrt, toresponse, choices, dt, means,
-    prior, sP, noisestd, etaN, intstd, kappa, bound, ndtmean, ndtspread, 
-    lapseprob, lapsetoprob):
+    prior, sP, noisestd, etaN, coupling, intstd, kappa, bound, ndtmean, 
+    ndtspread, lapseprob, lapsetoprob):
     
     C = len(choices)
     assert C == 2, "extended discrete static gauss model only allows 2 choices"
     
     S, D, N = features.shape
-           
+    
+    meandist = 0.0
+    for d in range(D):
+        meandist += (means[d, 0] - means[d, 1]) ** 2
+    meandist = math.sqrt(meandist)
+    
     choices_out = np.full(N, toresponse[0], dtype=np.int8)
     rts = np.full(N, toresponse[1])
     
@@ -729,11 +741,6 @@ def gen_response_jitted_edsg(features, maxrt, toresponse, choices, dt, means,
         if negNoiseTrial==0:
             negNoiseTrial=-1
             
-        if kappa[tr] == 0:
-            intstdTrVal = intstd[tr]
-        else:
-            intstdTrVal = np.random.wald(intstd[tr], 1/kappa[tr])
-            
         # is it a lapse trial?
         if random.random() < lapseprob[tr]:
             
@@ -754,6 +761,13 @@ def gen_response_jitted_edsg(features, maxrt, toresponse, choices, dt, means,
             logev = np.zeros(C)
             logev[0] = np.log(priorTrVal)
             logev[1] = np.log(1 - priorTrVal)
+
+            if coupling[tr]:
+                intvartr = noisestdTrVal / (dt * 3.5) * meandist
+            elif kappa[tr] == 0:
+                intvartr = intstd[tr] ** 2
+            else:
+                intvartr = np.random.wald(intstd[tr], 1/kappa[tr]) ** 2
 
             # for all presented features
             exitflag = False
@@ -777,7 +791,7 @@ def gen_response_jitted_edsg(features, maxrt, toresponse, choices, dt, means,
                     
                     #calculate the intstd based on the value for noisestdTrVals
 #                    intvarTrVal = (2 * noisestdTrVal) / (dt * 0.1)
-                    logev[c] += -1 / (2 * dt*intstdTrVal**2) * sum_sq
+                    logev[c] += -1 / (2 * dt*intvartr) * sum_sq
                         
                 logpost = normaliselogprob(logev)
                 
