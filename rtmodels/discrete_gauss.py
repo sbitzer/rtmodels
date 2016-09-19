@@ -467,9 +467,9 @@ class sensory_discrete_static_gauss(discrete_static_gauss):
 class extended_discrete_static_gauss(discrete_static_gauss):
     "Extended Bayesian Model"
     coupling = False
-    etaN=0.0001
-    kappa = 0.0001
-    sP=0.02
+    etaN=0.0
+    kappa = 0.0
+    sP=0.0
     
     parnames = ['bound', 'noisestd', 'etaN', 'coupling', 'intstd', 'kappa', 
                 'prior', 'sP', 'ndtmean', 'ndtspread', 'lapseprob', 
