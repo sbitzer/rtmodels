@@ -16,6 +16,13 @@ class rtmodel(metaclass=ABCMeta):
     # name of the model
     name = 'General RT model'
     
+    # memory limit: the gen_response methods should not use more than that
+    # at any point in time
+    memlim = 6000.0
+    
+    # number of parameters in model
+    P = None
+
     # number of trials currently stored in the model
     _L = 0
 
@@ -35,7 +42,7 @@ class rtmodel(metaclass=ABCMeta):
     @property
     def C(self):
         return self.choices.size
-    
+
     def __init__(self, choices=None, maxrt=None, toresponse=None):
         if choices is not None:
             self.choices = np.array(choices)
@@ -50,6 +57,10 @@ class rtmodel(metaclass=ABCMeta):
     
     @abstractmethod
     def gen_response_with_params(self, trind, params, parnames, user_code):
+        pass
+    
+    @abstractmethod
+    def estimate_memory_for_gen_response(self, N):
         pass
     
     def gen_response_from_Gauss_posterior(self, trind, parnames, mean, cov, S,

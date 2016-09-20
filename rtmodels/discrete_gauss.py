@@ -158,6 +158,14 @@ class discrete_static_gauss(rtmodel):
     
     prior_re = re.compile('(?:prior)(?:_(\d))?$')
     
+    @property
+    def P(self):
+        "number of parameters in the model"
+        
+        # the prior adds C-1 parameters, one of which is counted by its name
+        return len(self.parnames) + self.C - 2
+    
+    
     def __init__(self, use_features=None, Trials=None, dt=None, means=None, 
                  prior=None, noisestd=None, intstd=None, bound=None, 
                  bstretch=None, bshape=None, ndtmean=None, 
@@ -240,6 +248,15 @@ class discrete_static_gauss(rtmodel):
             self.lapsetoprob = lapsetoprob
             
     
+    def estimate_memory_for_gen_response(self, N):
+        """Estimate how much memory you would need to produce the desired responses."""
+        
+        mbpernum = 8 / 1024 / 1024
+        
+        # (for input features + for input params + for output responses)
+        return mbpernum * N * (self.D * self.S + self.P + 2)
+    
+    
     def gen_response(self, trind, rep=1):
         N = trind.size
         if rep > 1:
@@ -314,45 +331,80 @@ class discrete_static_gauss(rtmodel):
                              'number of parameters in params does not ' + 
                              'fit together')
         
-        # make a complete parameter dictionary with all parameters
-        # this is quite a bit of waste of memory and should probably be recoded
-        # more sensibly in the future, but for now it makes the jitted function
-        # simple
-        allpars = {}
-        for name in self.parnames:
-            if name in parnames:
-                allpars[name] = pardict[name]
-            else:
-                allpars[name] = getattr(self, name)
-                
-            if name == 'prior':
-                if allpars[name].ndim == 1:
-                    allpars[name] = np.tile(allpars[name], (N,1))
-                elif allpars[name].shape[0] == 1 and N > 1:
-                    allpars[name] = np.tile(allpars[name], (N,1))
-            elif np.isscalar(allpars[name]) and N >= 1:
-                allpars[name] = np.full(N, allpars[name], dtype=float)
-            elif allpars[name].shape[0] == 1 and N > 1:
-                allpars[name] = np.full(N, allpars[name], dtype=float)
+        NP = max(N, P)
         
-        # select input features
-        if self.use_features:
-            features = self.Trials[:, :, trind]
+        # if continuing would exceed the memory limit
+        if self.estimate_memory_for_gen_response(NP) > self.memlim:
+            # divide the job in smaller batches and run those
+        
+            # determine batch size for given memory limit
+            NB = math.floor(NP / self.estimate_memory_for_gen_response(NP) *
+                            self.memlim)
+            
+            choices = np.zeros(NP, dtype=np.int8)
+            rts = np.zeros(NP)
+            
+            remaining = NP
+            firstind = 0
+            while remaining > 0:
+                index = np.arange(firstind, firstind + min(remaining, NB))
+                if P > 1 and N > 1:
+                    trind_batch = trind[index]
+                    params_batch = extract_param_batch(pardict, index)
+                elif N == 1:
+                    trind_batch = trind
+                    params_batch = extract_param_batch(pardict, index)
+                elif P == 1:
+                    trind_batch = trind[index]
+                    params_batch = pardict
+                else:
+                    raise RuntimeError("N and P are not consistent.")
+                    
+                choices[index], rts[index] = self.gen_response_with_params(
+                    trind_batch, params_batch, user_code=user_code)
+                
+                remaining -= NB
+                firstind += NB
         else:
-            features = self.means[:, self._Trials[trind]]
-            features = np.tile(features, (self.S, 1, 1))
+            # make a complete parameter dictionary with all parameters
+            # this is quite a bit of waste of memory and should probably be recoded
+            # more sensibly in the future, but for now it makes the jitted function
+            # simple
+            allpars = {}
+            for name in self.parnames:
+                if name in parnames:
+                    allpars[name] = pardict[name]
+                else:
+                    allpars[name] = getattr(self, name)
+                    
+                if name == 'prior':
+                    if allpars[name].ndim == 1:
+                        allpars[name] = np.tile(allpars[name], (N,1))
+                    elif allpars[name].shape[0] == 1 and N > 1:
+                        allpars[name] = np.tile(allpars[name], (N,1))
+                elif np.isscalar(allpars[name]) and N >= 1:
+                    allpars[name] = np.full(N, allpars[name], dtype=float)
+                elif allpars[name].shape[0] == 1 and N > 1:
+                    allpars[name] = np.full(N, allpars[name], dtype=float)
             
-        # call the compiled function
-        choices, rts = self.gen_response_jitted(features, allpars, 
-                                                changing_bound)
-            
-        # transform choices to those expected by user, if necessary
-        if user_code:
-            toresponse_intern = np.r_[-1, self.toresponse[1]]
-            timed_out = choices == toresponse_intern[0]
-            choices[timed_out] = self.toresponse[0]
-            in_time = np.logical_not(timed_out)
-            choices[in_time] = self.choices[choices[in_time]]
+            # select input features
+            if self.use_features:
+                features = self.Trials[:, :, trind]
+            else:
+                features = self.means[:, self._Trials[trind]]
+                features = np.tile(features, (self.S, 1, 1))
+                
+            # call the compiled function
+            choices, rts = self.gen_response_jitted(features, allpars, 
+                                                    changing_bound)
+                
+            # transform choices to those expected by user, if necessary
+            if user_code:
+                toresponse_intern = np.r_[-1, self.toresponse[1]]
+                timed_out = choices == toresponse_intern[0]
+                choices[timed_out] = self.toresponse[0]
+                in_time = np.logical_not(timed_out)
+                choices[in_time] = self.choices[choices[in_time]]
             
         return choices, rts
         
@@ -831,3 +883,14 @@ def boundfun(tfrac, bound, bstretch, bshape):
     
     return 0.5 + (1 - bstretch) * (bound - 0.5) - ( bstretch * (bound - 0.5) *
         (1 - tshape) / (1 + tshape) );
+        
+
+def extract_param_batch(pardict, index):
+    newdict = {}
+    for parname, values in pardict.items():
+        if values.ndim == 2:
+            newdict[parname] = values[index, :]
+        else:
+            newdict[parname] = values[index]
+            
+    return newdict
