@@ -584,7 +584,7 @@ class extended_discrete_static_gauss(discrete_static_gauss):
         return info
         
 
-@jit(nopython=True, cache=True)
+@jit(nopython=True, cache=False)
 def gen_response_jitted_dsg(features, maxrt, toresponse, choices, dt, means,
     prior, noisestd, intstd, bound, bstretch, bshape, ndtmean, ndtspread, 
     lapseprob, lapsetoprob, changing_bound):
