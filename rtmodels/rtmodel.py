@@ -115,10 +115,12 @@ class rtmodel(metaclass=ABCMeta):
             up = samples[name].quantile(q_upper)
             lims = [low - 0.1 * up, 1.1 * up]
             pg.axes[0, p].set_xlim(lims)
-            if p == 0:
-                pg.axes[p, 1].set_ylim(lims)
-            else:
-                pg.axes[p, 0].set_ylim(lims)
+            
+            if pg.axes.shape[0] > 1:
+                if p == 0:
+                    pg.axes[p, 1].set_ylim(lims)
+                else:
+                    pg.axes[p, 0].set_ylim(lims)
                 
         pg.add_legend(frameon=True)
         
