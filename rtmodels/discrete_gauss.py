@@ -10,8 +10,11 @@ import math
 import random
 import numpy as np
 from numba import jit
-from warnings import warn
+from warnings import warn, filterwarnings
 from .rtmodel import rtmodel
+
+filterwarnings("always", message='This call to compute the log posterior', 
+               category=ResourceWarning)
 
 class discrete_static_gauss(rtmodel):
 
@@ -421,6 +424,164 @@ class discrete_static_gauss(rtmodel):
             
         return choices, rts
         
+        
+    def estimate_memory_for_logpost(self, N):
+        """Estimate how much memory you would need to produce the desired responses."""
+        
+        mbpernum = 8 / 1024 / 1024
+        
+        # (for input features + for input params + for output responses)
+        return mbpernum * N * self.C * self.S * 2
+        
+        
+    def compute_logpost_from_features(self, trind, R=1):
+        if self.estimate_memory_for_logpost(trind.size * R) > self.memlim:
+            warn("This call to compute the log posterior is likely to exceed "
+                 "the current memory limited.", 
+                 ResourceWarning)
+        
+        # create / select features
+        if self.use_features:
+            features = self.Trials[:, :, trind]
+        else:
+            features = self.means[:, self._Trials[trind]]
+            features = np.tile(features, (self.S, 1, 1))
+        
+        log_post = np.zeros((self.S, self.C, trind.size, R))
+        log_liks = np.zeros((self.S, self.C, trind.size, R))
+        for rep in range(R):
+            # add noise to features
+            noisy_features = features + np.random.normal(scale=self.noisestd,
+                                                         size=features.shape)
+        
+            # compute log posterior
+            log_post[:, :, :, rep], log_liks[:, :, :, rep] = \
+                self.accumulate_evidence(noisy_features)
+    
+        return log_post, log_liks
+        
+    
+    def accumulate_evidence(self, noisy_features):
+        # compute log-likelihoods of generative models
+        log_liks = np.full((self.S, self.C, noisy_features.shape[2]), np.nan)
+        
+        for c in range(self.C):
+            log_liks[:, c, :] = -0.5 / self.intstd**2 * np.sum(
+                (noisy_features - self.means[:, c][None, :, None]) ** 2, axis=1)
+        
+        # add log-prior to first time point
+        log_post = log_liks
+        log_post[0, :-1, :] += np.log(self.prior)[:, None]
+        log_post[0, -1, :] += math.log(1 - self.prior.sum())
+        
+        # accumulate
+        log_post = log_post.cumsum(axis=0)
+        
+        # normalise
+        log_post -= logsumexp_3d(log_post, axis=1)
+        
+        return log_post, log_liks
+        
+        
+    def gen_response_from_logpost(self, log_post):
+        # pre-compute collapsing bound
+        boundvals = np.full(self.S, math.log(self.bound))
+        if self.bstretch > 0:
+            for t in range(self.S):
+                boundvals[t] = math.log( boundfun((t+1.0) / self.maxrt, 
+                    self.bound, self.bstretch, self.bshape) )
+        
+        # add 4th dim when it's missing
+        if log_post.ndim == 3:
+            log_post = log_post[:, :, :, None]
+            
+        N, R = log_post.shape[2:]
+
+        rts = np.full((N, R), self.toresponse[1])
+        choices = np.full((N, R), self.toresponse[0], dtype=np.int8)
+
+        # loop over all trials and repetitions
+        for tr in range(N):
+            for rep in range(R):
+                # find log_posteriors which cross the bound
+                tind, cind = np.nonzero(log_post[:, :, tr, rep] > boundvals[:, None])
+                
+                # if bound was crossed at some point, record time point and choice
+                if tind.size > 0:
+                    # numpy always goes through the array in C-style order, i.e., 
+                    # nonzero elements will be identified within a row before
+                    # moving to the next row. As rows in log_post are time points,
+                    # this ensures that the first nonzero element will be also the
+                    # first time point the bound is crossed
+                    rt = (tind[0] + 1) * self.dt
+                    
+                    # add non-decision time
+                    rt += random.lognormvariate(self.ndtmean, self.ndtspread)
+                        
+                    # record response, if time is within maxrt
+                    if rt <= self.maxrt:
+                        rts[tr, rep] = rt
+                        choices[tr, rep] = self.choices[cind[0]]
+        
+        return choices, rts
+        
+    
+    def compute_surprise(self, log_post, log_liks):
+        """ computes -log(p(x_t|X_0:t-1)) = 
+            -log( sum_j p(x_t|M_j)p(M_j|X_0:t-1) )
+            everything is done in log-space for numerical stability
+            
+            log_post[t,j] = log(p(M_j|X_0:t))
+            log_liks[t,j] = log(p(x_t|M_j)) + log(gauss_Z)
+            with log(gauss_Z) = D/2 * log(2pi) + D * log(intstd)
+            
+            -log(p(x_t|X_0:t-1)) = -log(sum_j p(x_t|M_j)p(M_j|X_0:t-1))
+                = -log(sum_j exp( log(p(x_t|M_j)) + log(p(M_j|X_0:t-1)) ))
+                = -log(sum_j exp( log_liks[t,j] - log(gauss_Z) + log_post[t-1,j] ))
+                = log(gauss_Z) -log(sum_j exp( log_liks[t,j] + log_post[t-1,j] ))
+        """
+        if log_post.shape != log_liks.shape:
+            raise ValueError("log_post and log_liks must have the same shape.")
+        
+        # add dimensions when they're missing
+        input_shape = log_post.shape
+        if log_post.ndim == 3:
+            log_post = log_post[:, :, :, None]
+            log_liks = log_liks[:, :, :, None]
+        if log_post.ndim == 2:
+            log_post = log_post[:, :, None, None]
+            log_liks = log_liks[:, :, None, None]
+            
+        N, R = log_post.shape[2:]
+        
+        # get log-prior
+        log_prior = np.r_[np.log(self.prior), math.log(1 - self.prior.sum())]
+        
+        # log of normalisation constant of Gaussian
+        log_gauss_Z = ( self.D/2.0 * math.log(2*math.pi) + 
+                        self.D * math.log(self.intstd) )
+        
+        surprise = np.full((self.S, N, R), log_gauss_Z)
+        
+        # loop over all trials and repetitions
+        for tr in range(N):
+            for rep in range(R):
+                # new array: log posterior for previous data point
+                # i.e.: add log-prior to the front and drop last time point
+                log_post_previous = np.r_[log_prior[None, :], 
+                                          log_post[:-1, :, tr, rep]]
+                surprise[:, tr, rep] -= logsumexp_3d((log_liks[:, :, tr, rep] + 
+                    log_post_previous)[:, :, None], axis=1).squeeze(axis=(1,2))
+        
+        # if log_post had no 4th (reps) dimension, remove the corresponding 
+        # dimension from surprise, too
+        if len(input_shape) == 3:
+            surprise = surprise.squeeze(axis=(2,))
+        if len(input_shape) == 2:
+            surprise = surprise.squeeze(axis=(1,2))
+                    
+        return surprise
+        
     
     def plot_parameter_distribution(self, samples, names, q_lower=0, q_upper=1):
         if 'ndtmean' in samples.columns and 'ndtspread' in samples.columns:
@@ -647,7 +808,8 @@ def gen_response_jitted_dsg(features, maxrt, toresponse, choices, dt, means,
                         sum_sq += (noisy_feature[d] - means[d, c]) ** 2
                     logev[c] += -1 / (2 * intstd[tr]**2) * sum_sq
                         
-                logpost = normaliselogprob(logev)
+                # normalise
+                logpost = logev - logsumexp(logev)
                 
                 for c in range(C):
                     if logpost[c] >= boundval:
@@ -845,7 +1007,8 @@ def gen_response_jitted_edsg(features, maxrt, toresponse, choices, dt, means,
 #                    intvarTrVal = (2 * noisestdTrVal) / (dt * 0.1)
                     logev[c] += -1 / (2 * dt*intvartr) * sum_sq
                         
-                logpost = normaliselogprob(logev)
+                # normalise
+                logpost = logev - logsumexp(logev)
                 
                 for c in range(C):
                     if logpost[c] >= boundtr:
@@ -866,15 +1029,46 @@ def gen_response_jitted_edsg(features, maxrt, toresponse, choices, dt, means,
     
     return choices_out, rts
 
-    
+
 @jit(nopython=True, cache=True)
-def normaliselogprob(logvals):
+def logsumexp_3d(logvals, axis=0):
+    shape = logvals.shape
+    
+    assert len(shape) == 3, 'logvals in logsumexp_3d has to be 3d!'
+    
+    if axis == 0:
+        logsum = np.zeros((1, shape[1], shape[2]))
+        for i1 in range(shape[1]):
+            for i2 in range(shape[2]):
+                logsum[0, i1, i2] = logsumexp(
+                    logvals[:, i1, i2])
+    elif axis == 1:
+        logsum = np.zeros((shape[0], 1, shape[2]))
+        for i0 in range(shape[0]):
+            for i2 in range(shape[2]):
+                logsum[i0, 0, i2] = logsumexp(
+                    logvals[i0, :, i2])
+    elif axis == 2:
+        logsum = np.zeros((shape[0], shape[1], 1))
+        for i0 in range(shape[0]):
+            for i1 in range(shape[1]):
+                logsum[i0, i1, 0] = logsumexp(
+                    logvals[i0, i1, :])
+    else:
+        raise ValueError("Argument 'axis' has illegal value in "
+                         "logsumexp_3d!")
+    
+    return logsum
+
+
+@jit(nopython=True, cache=True)
+def logsumexp(logvals):
     mlogv = logvals.max()
     
     # bsxfun( @plus, mlogp, log( sum( exp( bsxfun(@minus, logp, mlogp) ) ) ) );
     logsum = mlogv + np.log( np.sum( np.exp(logvals - mlogv) ) )
     
-    return logvals - logsum
+    return logsum
     
 
 @jit(nopython=True, cache=True)
