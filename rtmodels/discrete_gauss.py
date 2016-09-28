@@ -668,6 +668,19 @@ class sensory_discrete_static_gauss(discrete_static_gauss):
         
         return choices, rts
         
+    
+    def compute_logpost_from_features(self, trind, R=1):
+        raise NotImplementedError()
+        
+    def accumulate_evidence(self, noisy_features):
+        raise NotImplementedError()
+        
+    def gen_response_from_logpost(self, log_post):
+        raise NotImplementedError()
+        
+    def compute_surprise(self, log_post, log_liks):
+        raise NotImplementedError()
+        
         
     def __str__(self):
         info = super(sensory_discrete_static_gauss, self).__str__()
@@ -732,6 +745,19 @@ class extended_discrete_static_gauss(discrete_static_gauss):
             allpars['lapsetoprob'])
         
         return choices, rts
+        
+        
+    def compute_logpost_from_features(self, trind, R=1):
+        raise NotImplementedError()
+        
+    def accumulate_evidence(self, noisy_features):
+        raise NotImplementedError()
+        
+    def gen_response_from_logpost(self, log_post):
+        raise NotImplementedError()
+        
+    def compute_surprise(self, log_post, log_liks):
+        raise NotImplementedError()
         
 
     def __str__(self):
