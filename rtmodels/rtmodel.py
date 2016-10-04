@@ -23,33 +23,30 @@ class rtmodel(metaclass=ABCMeta):
     # number of parameters in model
     P = None
 
-    # number of trials currently stored in the model
-    _L = 0
-
     @property
     def L(self):
         return self._L
-    
-    # maximum RT considered by the model; anything above will be timed-out
-    maxrt = np.inf
-    
-    # choice and rt used for timed out trials
-    toresponse = np.array([0, np.inf])
-    
-    # choices
-    choices = np.array([1, 2])
     
     @property
     def C(self):
         return self.choices.size
 
-    def __init__(self, choices=None, maxrt=None, toresponse=None):
-        if choices is not None:
-            self.choices = np.array(choices)
-        if maxrt is not None:
-            self.maxrt = maxrt
-        if toresponse is not None:
+    def __init__(self, choices=[1, 2], maxrt=np.inf, toresponse=None):
+        # number of trials currently stored in the model
+        self._L = 0
+        
+        # maximum RT considered by the model; anything above will be timed-out
+        self.maxrt = maxrt
+        
+        # choice and rt used for timed out trials
+        if toresponse is None:
+            self.toresponse = np.array([0, maxrt+1])
+        else:
             self.toresponse = toresponse
+        
+        # choices (should be an iterable, will be converted to numpy array)
+        self.choices = np.array(choices)
+    
     
     @abstractmethod
     def gen_response(self, trind):

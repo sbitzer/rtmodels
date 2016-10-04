@@ -18,26 +18,16 @@ filterwarnings("always", message='This call to compute the log posterior',
 
 class discrete_static_gauss(rtmodel):
 
-    "Whether the model uses time-varying features for decision making."
-    use_features = True
-    
-    _D = None
     @property
     def D(self):
-        """The dimensionality of the features space assumed by the model."""
+        """The dimensionality of the features space assumed by the model (read-only)."""
         return self._D
     
-    _dt = 0.1
     @property
-    def dt(self):
-        """Time resolution of model simulations."""
-        return self._dt
-        
-    @dt.setter
-    def dt(self, dt):
-        self._dt = dt
+    def use_features(self):
+        """Whether the model uses features as input, or just means."""
+        return self._use_features
     
-    _Trials = None
     @property
     def Trials(self):
         """Trial information used by the model.
@@ -56,7 +46,9 @@ class discrete_static_gauss(rtmodel):
         
     @Trials.setter
     def Trials(self, Trials):
-        if self.use_features:
+        Trials = np.array(Trials)
+        
+        if Trials.ndim == 3:
             self._Trials = Trials
             S, D, self._L = Trials.shape
             
@@ -64,7 +56,9 @@ class discrete_static_gauss(rtmodel):
                 warn('The dimensions of the input features in "Trials" ' + 
                      '(D=%d) do not match those stored in the model (D=%d)' % 
                      (D, self.D), RuntimeWarning)
-        else:
+                     
+            self._use_features = True
+        elif Trials.ndim == 1:
             # check that Trials only contains valid choice codes
             if np.all(np.in1d(np.unique(Trials), self.choices)):
                 # transform to indices into self.choices
@@ -72,19 +66,21 @@ class discrete_static_gauss(rtmodel):
                                          for i in Trials])
                 self._L = len(Trials)
             else:
-                raise ValueError('Trials may only contain valid choice codes' + 
+                raise ValueError('Trials may only contain valid choice codes' +
                                  ' when features are not used.')
+            self._use_features = False
+        else:
+            raise ValueError('Trials has unknown format, please check!')
     
     @property
     def S(self):
         """Number of time steps maximally simulated by the model."""
-        if len(self.Trials.shape) == 3:
+        if self.Trials.ndim == 3:
             return self.Trials.shape[0]
         else:
             # the + 1 ensures that time outs can be generated
             return math.ceil(self.maxrt / self.dt) + 1
     
-    _means = None
     @property
     def means(self):
         """Mean features values assumed in model."""
@@ -111,24 +107,6 @@ class discrete_static_gauss(rtmodel):
     parnames = ['bound', 'bstretch', 'bshape', 'noisestd', 'intstd', 'prior', 
                 'ndtmean', 'ndtspread', 'lapseprob', 'lapsetoprob']
 
-    """Bound that needs to be reached before decision is made.
-       If collapsing, it's the initial value."""
-    bound = 0.8
-    
-    "Extent of collapse for bound, see boundfun."
-    bstretch = 0
-    
-    "Shape parameter of the collapsing bound, see boundfun"
-    bshape = 1.4
-    
-    "Standard deviation of noise added to feature values."
-    noisestd = 1
-    
-    "Standard deviation of internal uncertainty."
-    intstd = 1
-
-    _prior = None
-    
     @property
     def prior(self):
         "Prior probabilities over choices."
@@ -144,19 +122,7 @@ class discrete_static_gauss(rtmodel):
             raise TypeError("The prior should be a numpy array with C-1 "
                             "elements! For two choices only you may also "
                             "provide a scalar.")
-    
-    "Mean of nondecision time."
-    ndtmean = 0
-    
-    "Spread of nondecision time."
-    ndtspread = 0
-    
-    "Probability of a lapse."
-    lapseprob = 0.05
-    
-    "Probability that a lapse will be timed out."
-    lapsetoprob = 0.1
-    
+
     prior_re = re.compile('(?:prior)(?:_(\d))?$')
     
     @property
@@ -167,41 +133,49 @@ class discrete_static_gauss(rtmodel):
         return len(self.parnames) + self.C - 2
     
     
-    def __init__(self, use_features=None, Trials=None, dt=None, means=None, 
-                 prior=None, noisestd=None, intstd=None, bound=None, 
-                 bstretch=None, bshape=None, ndtmean=None, 
-                 ndtspread=None, lapseprob=None, lapsetoprob=None,
-                 choices=None, maxrt=None, toresponse=None):
-        super(discrete_static_gauss, self).__init__(choices, maxrt, 
-            toresponse)
+    def __init__(self, Trials, dt=1, means=None, prior=None, noisestd=1, 
+                 intstd=1, bound=0.8, bstretch=0, bshape=1.4, ndtmean=-12, 
+                 ndtspread=0, lapseprob=0.05, lapsetoprob=0.1, **rtmodel_args):
+        super(discrete_static_gauss, self).__init__(**rtmodel_args)
             
         self.name = 'Discrete static Gauss model'
-            
-        if dt is not None:
-            self.dt = dt
-            
-        if use_features is not None:
-            if Trials is not None:
-                warn('use_features and Trials are given to construct model. ' +
-                     'The value of use_features will be determined from ' +
-                     'Trials and the given value will be discarded!', 
-                     RuntimeWarning)
+        
+        # Time resolution of model simulations.
+        self.dt = dt
+        
+        # Trial information used by the model.
+        Trials = np.array(Trials)
+        
+        # try to figure out the dimensionality of feature space from means
+        D_mean = None
+        if means is not None:
+            means = np.array(means)
+            if means.ndim == 1:
+                D_mean = 1
             else:
-                self.use_features = use_features
-            
-        if Trials is not None:
-            if type(Trials) is list:
-                Trials = np.array(Trials)
-                
-            dim = len(Trials.shape)
-            if dim == 1:
-                self.use_features = False
+                D_mean = means.shape[0]
+        
+        # check with dimensionality of feature space from Trials
+        if Trials.ndim == 1:
+            if D_mean is None:
+                # no information provided by user
                 self._D = 1
-            elif dim == 3:
-                self.use_features = True
+            else:
+                self._D = D_mean
+        elif Trials.ndim == 3:
+            if D_mean is None: 
                 self._D = Trials.shape[1]
-                
-            self.Trials = Trials
+            else:
+                if Trials.shape[1] == D_mean:
+                    self._D = Trials.shape[1]
+                else:
+                    raise ValueError("The dimensionality of the provided "
+                                     "means and features in Trials is not "
+                                     "consistent!")
+        
+        # now set Trials internally (because dimensionality of feature space is
+        # set before, there should be no warnings)
+        self.Trials = Trials
         
         if means is not None:
             self.means = means
@@ -215,38 +189,40 @@ class discrete_static_gauss(rtmodel):
         else:
             warn('Cannot set default means. Please provide means yourself!',
                  RuntimeWarning)
-                 
-        if prior is not None:
-            self.prior = prior
-        else:
+            
+        # Prior probabilities over choices.
+        if prior is None:
             self.prior = np.ones(self.C-1) / self.C
+        else:
+            self.prior = prior
             
-        if noisestd is not None:
-            self.noisestd = noisestd
+        # Standard deviation of noise added to feature values.
+        self.noisestd = noisestd
             
-        if intstd is not None:
-            self.intstd = intstd
+        # Standard deviation of internal uncertainty.
+        self.intstd = intstd
             
-        if bound is not None:
-            self.bound = bound
+        # Bound that needs to be reached before decision is made.
+        # If collapsing, it's the initial value.
+        self.bound = bound
             
-        if bstretch is not None:
-            self.bstretch = bstretch
+        # Extent of collapse for bound, see boundfun.
+        self.bstretch = bstretch
         
-        if bshape is not None:
-            self.bshape = bshape
+        # Shape parameter of the collapsing bound, see boundfun
+        self.bshape = bshape
             
-        if ndtmean is not None:
-            self.ndtmean = ndtmean
+        # Mean of nondecision time.
+        self.ndtmean = ndtmean
             
-        if ndtspread is not None:
-            self.ndtspread = ndtspread
+        # Spread of nondecision time.
+        self.ndtspread = ndtspread
             
-        if lapseprob is not None:
-            self.lapseprob = lapseprob
+        # Probability of a lapse.
+        self.lapseprob = lapseprob
             
-        if lapsetoprob is not None:
-            self.lapsetoprob = lapsetoprob
+        # Probability that a lapse will be timed out.
+        self.lapsetoprob = lapsetoprob
             
     
     def estimate_memory_for_gen_response(self, N):
@@ -626,22 +602,12 @@ class discrete_static_gauss(rtmodel):
         
 
 class sensory_discrete_static_gauss(discrete_static_gauss):
-    "Drift of sensory accumulator"
-    sensdrift = 1.0
-    
     parnames = ['bound', 'bstretch', 'bshape', 'noisestd', 'intstd', 
                 'sensdrift', 'prior', 'ndtmean', 'ndtspread', 'lapseprob', 
                 'lapsetoprob']
 
-    def __init__(self, use_features=None, Trials=None, dt=None, means=None, 
-                 prior=None, noisestd=None, sensdrift=None, intstd=None, 
-                 bound=None, bstretch=None, bshape=None, ndtmean=None, 
-                 ndtspread=None, lapseprob=None, lapsetoprob=None,
-                 choices=None, maxrt=None, toresponse=None):
-        super(sensory_discrete_static_gauss, self).__init__(use_features, 
-            Trials, dt, means, prior, noisestd, intstd, bound, bstretch, 
-            bshape, ndtmean, ndtspread, lapseprob, lapsetoprob, choices, maxrt, 
-            toresponse)
+    def __init__(self, sensdrift=1.0, **dsg_args):
+        super(sensory_discrete_static_gauss, self).__init__(**dsg_args)
             
         self.name = 'Sensory discrete static Gauss model'
         
@@ -649,8 +615,8 @@ class sensory_discrete_static_gauss(discrete_static_gauss):
             raise ValueError("The sensory discrete static gauss model is " + 
                              "currently only implemented for 2 alternatives.")
         
-        if sensdrift is not None:
-            self.sensdrift = sensdrift
+        "Drift of sensory accumulator"
+        self.sensdrift = sensdrift
 
             
     def gen_response_jitted(self, features, allpars, changing_bound):
@@ -689,39 +655,25 @@ class sensory_discrete_static_gauss(discrete_static_gauss):
         
 
 class extended_discrete_static_gauss(discrete_static_gauss):
-    "Extended Bayesian Model"
-    coupling = False
-    etaN=0.0
-    kappa = 0.0
-    sP=0.0
+    """Extended static Gauss model"""
     
     parnames = ['bound', 'noisestd', 'etaN', 'coupling', 'intstd', 'kappa', 
                 'prior', 'sP', 'ndtmean', 'ndtspread', 'lapseprob', 
                 'lapsetoprob']
 
-    def __init__(self, use_features=None, Trials=None, dt=None, means=None, 
-                 prior=None, sP=None, noisestd=None, etaN=None, coupling=None,
-                 intstd=None, kappa=None, ndtmean=None, ndtspread=None, lapseprob=None, 
-                 lapsetoprob=None, choices=None, maxrt=None, toresponse=None):
-        super(extended_discrete_static_gauss, self).__init__(
-            use_features=use_features, Trials=Trials, dt=dt, means=means, 
-            prior=prior, noisestd=noisestd, intstd=intstd, ndtmean=ndtmean, 
-            ndtspread=ndtspread, lapseprob=lapseprob, lapsetoprob=lapsetoprob, 
-            choices=choices, maxrt=maxrt, toresponse=toresponse)
+    def __init__(self, ndtmean=0.0, sP=0.0, etaN=0.0, coupling=True, 
+                 kappa=0.0, **dsg_args):
+        super(extended_discrete_static_gauss, self).__init__(ndtmean, **dsg_args)
                 
         self.name = 'Extended static Gauss model'
         
-        if coupling is not None:
-            self.coupling = coupling
+        self.coupling = coupling
         
-        if etaN is not None:
-            self.etaN=etaN
+        self.etaN=etaN
         
-        if kappa is not None:
-            self.kappa=kappa
+        self.kappa=kappa
         
-        if sP is not None:
-            self.sP = sP
+        self.sP = sP
          
     
     # overwrite method of discrete_static_gauss to skip directly to basic 
