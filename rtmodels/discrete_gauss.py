@@ -37,8 +37,6 @@ class discrete_static_gauss(rtmodel):
     def dt(self, dt):
         self._dt = dt
     
-    _Time = None
-    
     _Trials = None
     @property
     def Trials(self):
