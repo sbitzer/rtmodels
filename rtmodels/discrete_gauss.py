@@ -26,7 +26,10 @@ class discrete_static_gauss(rtmodel):
     @property
     def use_features(self):
         """Whether the model uses features as input, or just means."""
-        return self._use_features
+        if self._Trials.ndim == 1:
+            return False
+        else:
+            return True
     
     @property
     def Trials(self):
@@ -56,8 +59,6 @@ class discrete_static_gauss(rtmodel):
                 warn('The dimensions of the input features in "Trials" ' + 
                      '(D=%d) do not match those stored in the model (D=%d)' % 
                      (D, self.D), RuntimeWarning)
-                     
-            self._use_features = True
         elif Trials.ndim == 1:
             # check that Trials only contains valid choice codes
             if np.all(np.in1d(np.unique(Trials), self.choices)):
@@ -68,7 +69,6 @@ class discrete_static_gauss(rtmodel):
             else:
                 raise ValueError('Trials may only contain valid choice codes' +
                                  ' when features are not used.')
-            self._use_features = False
         else:
             raise ValueError('Trials has unknown format, please check!')
     
