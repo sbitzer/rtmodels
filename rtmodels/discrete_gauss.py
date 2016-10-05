@@ -663,7 +663,8 @@ class extended_discrete_static_gauss(discrete_static_gauss):
 
     def __init__(self, ndtmean=0.0, sP=0.0, etaN=0.0, coupling=True, 
                  kappa=0.0, **dsg_args):
-        super(extended_discrete_static_gauss, self).__init__(ndtmean, **dsg_args)
+        super(extended_discrete_static_gauss, self).__init__(ndtmean=ndtmean, 
+                                                             **dsg_args)
                 
         self.name = 'Extended static Gauss model'
         
