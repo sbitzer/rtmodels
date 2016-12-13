@@ -130,6 +130,49 @@ class rtmodel(metaclass=ABCMeta):
         return pg
         
         
+    def estimate_entropy(self, choice, rt, B=50):
+        """Estimates entropy of sampled response distribution based on histogram.
+        
+            See II.2 (ii) The resubstitution estimate of 
+            "Nonparametric entropy estimation: an overview" by Beirlant et al.
+            http://jimbeck.caltech.edu/summerlectures/references/Entropy%20estimation.pdf
+            
+            Current implementation is even simpler: it just makes a fixed 
+            discrete approximation of the response distribution based on the 
+            given number of bins B and the maxrt of the model. Then it computes
+            the entropy of that discrete distribution.
+            
+            NOTE: you cannot easily compare entropies based on different 
+            discrete approximations, i.e., entropies based on different B or
+            maxrt.
+        """
+        # get distribution of choices
+        ch_prob = np.array([np.sum(choice==ch) for ch in self.choices])
+        ch_prob = ch_prob / choice.size
+        
+        # contribution from timed out trials
+        to_prob = 1-ch_prob.sum()
+        if to_prob > 0:
+            entropy = -(to_prob) * np.log(to_prob)
+        else:
+            entropy = 0
+        
+        # for each choice compute entropy from histogram of RTs
+        for ch, prob in zip(self.choices, ch_prob):
+            if prob > 0:
+                cnts, edges = np.histogram(rt[choice==ch], bins=B, range=(0, 
+                                           self.maxrt))
+                N = cnts.sum()
+                dens = cnts / N * prob
+                
+                # ignore empty bins
+                dens = dens[dens>0]
+                
+                entropy -= np.sum(dens * np.log(dens))
+            
+        return entropy
+            
+        
     def __str__(self):
         # underlined model name
         info =  self.name + '\n' + '-' * len(self.name) + '\n'  
