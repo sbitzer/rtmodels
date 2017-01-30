@@ -457,7 +457,30 @@ class discrete_static_gauss(rtmodel):
         return log_post, log_liks
         
         
-    def gen_response_from_logpost(self, log_post):
+    def gen_response_from_logpost(self, log_post, lapses=True, ndt=True):
+        """Generates model responses from pre-computed log-posterior over options.
+        
+            Parameters
+            ----------
+            log_post : ndarray
+                pre-computed log-posterior values over decision alternatives
+                (#time steps, #alternatives, #trials, #repetitions) = shape
+                the last dimension (repetitions) may be omitted
+            lapses : bool, default True
+                whether to also produce lapses according to the model's lapse
+                probabilities
+            ndt : bool, default True
+                whether to add non-decision time to computed decision times
+                
+            Returns
+            -------
+            choices : ndarray
+                computed choice
+                (#trials, #repetitions) = shape
+            rts : ndarray
+                computed response times
+                (#trials, #repetitions) = shape
+        """
         # pre-compute collapsing bound
         boundvals = np.full(self.S, math.log(self.bound))
         if self.bstretch > 0:
@@ -477,25 +500,39 @@ class discrete_static_gauss(rtmodel):
         # loop over all trials and repetitions
         for tr in range(N):
             for rep in range(R):
-                # find log_posteriors which cross the bound
-                tind, cind = np.nonzero(log_post[:, :, tr, rep] > boundvals[:, None])
-                
-                # if bound was crossed at some point, record time point and choice
-                if tind.size > 0:
-                    # numpy always goes through the array in C-style order, i.e., 
-                    # nonzero elements will be identified within a row before
-                    # moving to the next row. As rows in log_post are time points,
-                    # this ensures that the first nonzero element will be also the
-                    # first time point the bound is crossed
-                    rt = (tind[0] + 1) * self.dt
+                # account for lapses
+                if lapses and np.random.rand(1) < self.lapseprob:
+                    # if response is NOT a timed-out lapse
+                    if np.random.rand(1) > self.lapsetoprob:
+                        # generate uniformly distributed lapse response
+                        rts[tr, rep] = np.random.rand(1) * self.maxrt
+                        choices[tr, rep] = self.choices[np.random.randint(
+                                self.C)]
+                else:
+                    # find log_posteriors which cross the bound
+                    tind, cind = np.nonzero(log_post[:, :, tr, rep] > 
+                                            boundvals[:, None])
                     
-                    # add non-decision time
-                    rt += random.lognormvariate(self.ndtmean, self.ndtspread)
+                    # if bound was crossed at some point, record time point 
+                    # and choice
+                    if tind.size > 0:
+                        # numpy always goes through the array in C-style order,
+                        #  i.e., nonzero elements will be identified within a 
+                        # row before moving to the next row. As rows in 
+                        # log_post are time points, this ensures that the first
+                        # nonzero element will be also the first time point the
+                        # bound is crossed
+                        rt = (tind[0] + 1) * self.dt
                         
-                    # record response, if time is within maxrt
-                    if rt <= self.maxrt:
-                        rts[tr, rep] = rt
-                        choices[tr, rep] = self.choices[cind[0]]
+                        # add non-decision time
+                        if ndt:
+                            rt += random.lognormvariate(self.ndtmean, 
+                                                        self.ndtspread)
+                            
+                        # record response, if time is within maxrt
+                        if rt <= self.maxrt:
+                            rts[tr, rep] = rt
+                            choices[tr, rep] = self.choices[cind[0]]
         
         return choices, rts
         
