@@ -444,7 +444,7 @@ class discrete_static_gauss(rtmodel):
                 (noisy_features - self.means[:, c][None, :, None]) ** 2, axis=1)
         
         # add log-prior to first time point
-        log_post = log_liks
+        log_post = log_liks.copy()
         log_post[0, :-1, :] += np.log(self.prior)[:, None]
         log_post[0, -1, :] += math.log(1 - self.prior.sum())
         
