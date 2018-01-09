@@ -88,12 +88,13 @@ class rtmodel(metaclass=ABCMeta):
         return response_distance(choice_data, choices, rt_data, rts)
     
     
-    def plot_response_distribution(self, choice, rt, alpha=1):
+    def plot_response_distribution(self, choice, rt, alpha=1, ax=None):
         rtlist = []
         for c in self.choices:
             rtlist.append(rt[choice == c])
-            
-        ax = plt.axes()
+        
+        if ax is None:
+            ax = plt.axes()
         
         _, _, patches = ax.hist(rtlist, bins=20, normed=True, 
                                 range=(0, self.maxrt), stacked=True)
