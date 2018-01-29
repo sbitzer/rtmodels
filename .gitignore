@@ -1,3 +1,5 @@
+*.py[cod]
 rtmodels.egg-info
 .spyderproject
+.spyproject
 __pycache__
