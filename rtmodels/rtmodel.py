@@ -11,8 +11,9 @@ import matplotlib.pyplot as plt
 from numba import vectorize
 import seaborn as sns
 
-class rtmodel(metaclass=ABCMeta):
-
+class rtmodel(object):
+    __metaclass__ = ABCMeta
+    
     # name of the model
     name = 'General RT model'
     

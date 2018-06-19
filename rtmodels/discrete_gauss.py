@@ -14,7 +14,7 @@ from warnings import warn, filterwarnings
 from .rtmodel import rtmodel
 
 filterwarnings("always", message='This call to compute the log posterior', 
-               category=ResourceWarning)
+               category=RuntimeWarning)
 
 class discrete_static_gauss(rtmodel):
 
@@ -79,7 +79,7 @@ class discrete_static_gauss(rtmodel):
             return self.Trials.shape[0]
         else:
             # the + 1 ensures that time outs can be generated
-            return math.ceil(self.maxrt / self.dt) + 1
+            return int(math.ceil(self.maxrt / self.dt)) + 1
     
     @property
     def means(self):
@@ -315,8 +315,8 @@ class discrete_static_gauss(rtmodel):
             # divide the job in smaller batches and run those
         
             # determine batch size for given memory limit
-            NB = math.floor(NP / self.estimate_memory_for_gen_response(NP) *
-                            self.memlim)
+            NB = int(math.floor(
+                    NP / self.estimate_memory_for_gen_response(NP) * self.memlim))
             
             choices = np.zeros(NP, dtype=np.int8)
             rts = np.zeros(NP)
@@ -412,7 +412,7 @@ class discrete_static_gauss(rtmodel):
         if self.estimate_memory_for_logpost(trind.size * R) > self.memlim:
             warn("This call to compute the log posterior is likely to exceed "
                  "the current memory limited.", 
-                 ResourceWarning)
+                 RuntimeWarning)
         
         # create / select features
         if self.use_features:
