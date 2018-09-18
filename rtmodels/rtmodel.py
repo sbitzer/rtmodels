@@ -99,7 +99,7 @@ class rtmodel(object):
         if ax is None:
             ax = plt.axes()
         
-        _, _, patches = ax.hist(rtlist, bins=20, normed=True, 
+        _, _, patches = ax.hist(rtlist, bins=20, density=True,
                                 range=(0, self.maxrt), stacked=True)
         
         if alpha < 1:
