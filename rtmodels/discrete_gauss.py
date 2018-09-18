@@ -5,6 +5,8 @@ Created on Wed Mar 23 15:06:05 2016
 @author: Sebastian Bitzer (sebastian.bitzer@tu-dresden.de)
 """
 
+from __future__ import print_function, division
+
 import re
 import math
 import random

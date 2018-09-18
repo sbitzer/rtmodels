@@ -5,6 +5,8 @@ Created on Wed Mar 23 11:51:27 2016
 @author: Sebastian Bitzer (sebastian.bitzer@tu-dresden.de)
 """
 
+from __future__ import print_function, division
+
 from abc import ABCMeta, abstractmethod
 import numpy as np
 import matplotlib.pyplot as plt
